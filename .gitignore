@@ -1,0 +1,36 @@
+# ==========================================
+# Android Studio & Gradle - Ignore Local Builds
+# ==========================================
+.gradle/
+build/
+*/build/
+local.properties
+.cxx/
+.externalNativeBuild/
+captures/
+
+# ==========================================
+# Android Studio IDE Internal Settings 
+# (Prevents configuration conflicts on GitHub)
+# ==========================================
+.idea/
+*.iml
+*.ipr
+*.iws
+
+# ==========================================
+# Output Artifacts & Compiled Files
+# ==========================================
+*.apk
+*.ap_
+*.aar
+*.jar
+*.dex
+*.class
+
+# ==========================================
+# Operating System Caches (Mac/Windows)
+# ==========================================
+.DS_Store
+Thumbs.db
+*.log
