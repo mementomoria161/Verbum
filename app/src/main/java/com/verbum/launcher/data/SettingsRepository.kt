@@ -3,6 +3,7 @@ package com.verbum.launcher.data
 import android.content.Context
 import android.net.Uri
 import androidx.datastore.preferences.core.MutablePreferences
+import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.longPreferencesKey
@@ -42,7 +43,12 @@ class SettingsRepository(private val context: Context) {
         val BG_IMAGE = stringPreferencesKey("bg_image_path")
         val FONT = stringPreferencesKey("font_path")
         val FONT_NAME = stringPreferencesKey("font_name")
+        val SHOW_FOLDER_NAMES = booleanPreferencesKey("show_folder_names")
+        val TEXT_BY_USAGE = booleanPreferencesKey("text_color_by_usage")
+        val USAGE = stringPreferencesKey("usage_json")
     }
+
+    private val usageWindowMs = 30L * 24 * 60 * 60 * 1000 // 30 days
 
     private val json = Json { ignoreUnknownKeys = true }
 
@@ -57,7 +63,17 @@ class SettingsRepository(private val context: Context) {
             bgImagePath = prefs[Keys.BG_IMAGE],
             fontPath = prefs[Keys.FONT],
             fontName = prefs[Keys.FONT_NAME],
+            showFolderNames = prefs[Keys.SHOW_FOLDER_NAMES] ?: true,
+            textColorByUsage = prefs[Keys.TEXT_BY_USAGE] ?: false,
+            usageCounts = countRecentUsage(prefs[Keys.USAGE]),
         )
+    }
+
+    private fun countRecentUsage(raw: String?): Map<String, Int> {
+        val stamps = decodeOrDefault<Map<String, List<Long>>>(raw, emptyMap())
+        val cutoff = System.currentTimeMillis() - usageWindowMs
+        return stamps.mapValues { (_, times) -> times.count { it >= cutoff } }
+            .filterValues { it > 0 }
     }
 
     private inline fun <reified T> decodeOrDefault(raw: String?, default: T): T =
@@ -193,6 +209,28 @@ class SettingsRepository(private val context: Context) {
 
     suspend fun setBackgroundColor(argb: Long) =
         context.dataStore.edit { it[Keys.BG_COLOR] = argb }
+
+    suspend fun setShowFolderNames(show: Boolean) =
+        context.dataStore.edit { it[Keys.SHOW_FOLDER_NAMES] = show }
+
+    suspend fun setTextColorByUsage(enabled: Boolean) =
+        context.dataStore.edit { it[Keys.TEXT_BY_USAGE] = enabled }
+
+    /** Records an app launch and prunes launches older than the 30-day window. */
+    suspend fun recordLaunch(appKey: String) {
+        context.dataStore.edit { prefs ->
+            val stamps = decodeOrDefault<Map<String, List<Long>>>(prefs[Keys.USAGE], emptyMap())
+            val now = System.currentTimeMillis()
+            val cutoff = now - usageWindowMs
+            val updated = stamps
+                .mapValues { (_, times) -> times.filter { it >= cutoff } }
+                .toMutableMap()
+            val appTimes = (updated[appKey].orEmpty() + now).takeLast(500)
+            updated[appKey] = appTimes
+            updated.entries.removeAll { it.value.isEmpty() }
+            prefs[Keys.USAGE] = json.encodeToString(updated)
+        }
+    }
 
     suspend fun setBackgroundImage(uri: Uri) {
         val copied = copyToFiles(uri, "background_") ?: return

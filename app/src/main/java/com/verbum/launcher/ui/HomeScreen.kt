@@ -6,16 +6,18 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
@@ -59,13 +61,12 @@ fun VerbumApp(viewModel: VerbumViewModel) {
         color = textColor.copy(alpha = 0.65f),
     )
 
-    // Dialog state.
-    var menuApp by remember { mutableStateOf<AppInfo?>(null) }
+    // Overlay & dialog state.
+    var menuAppKey by remember { mutableStateOf<String?>(null) }
     var renameTarget by remember { mutableStateOf<AppInfo?>(null) }
-    var moveTarget by remember { mutableStateOf<AppInfo?>(null) }
     var elementRenameTarget by remember { mutableStateOf<GridElement?>(null) }
     var showAddFolder by remember { mutableStateOf(false) }
-    var showAppManagement by remember { mutableStateOf(false) }
+    var showHideApps by remember { mutableStateOf(false) }
 
     BackHandler(enabled = transient.searchOpen || transient.editMode || transient.customizeOpen) {
         when {
@@ -89,13 +90,12 @@ fun VerbumApp(viewModel: VerbumViewModel) {
             )
         }
 
+        // Layer 1: the grid, leaving room for the bottom bar below.
         Column(
             Modifier
                 .fillMaxSize()
                 .safeDrawingPadding()
         ) {
-            // Grid area — also hosts the Customize overlay so it floats above
-            // the bottom bar (which stays visible and usable beneath it).
             Box(
                 Modifier
                     .weight(1f)
@@ -106,42 +106,76 @@ fun VerbumApp(viewModel: VerbumViewModel) {
                         .fillMaxSize()
                         .padding(horizontal = 8.dp),
                     elements = state.elements,
+                    folders = state.folders,
                     editMode = transient.editMode,
+                    menuAppKey = menuAppKey,
                     appTextStyle = appTextStyle,
                     titleTextStyle = titleTextStyle,
                     accentColor = textColor,
                     onAppClick = viewModel::launchApp,
-                    onAppLongPress = { menuApp = it },
+                    onAppMenuRequest = { menuAppKey = it.key },
+                    onAppMenuDismiss = { menuAppKey = null },
+                    onAppRename = { app ->
+                        menuAppKey = null
+                        renameTarget = app
+                    },
+                    onAppHide = { app ->
+                        menuAppKey = null
+                        viewModel.hideApp(app)
+                    },
+                    onAppMove = { app, folderId ->
+                        menuAppKey = null
+                        viewModel.moveAppToFolder(app, folderId)
+                    },
                     onEnterEditMode = { viewModel.setEditMode(true) },
                     onElementMove = viewModel::moveElement,
                     onElementResize = viewModel::resizeElement,
                     onElementDelete = viewModel::removeElement,
                     onElementRename = { elementRenameTarget = it },
+                    onElementToggleSingleColumn = viewModel::toggleElementSingleColumn,
+                    onElementToggleShowName = viewModel::toggleElementShowName,
+                    onElementCycleAlignment = viewModel::cycleElementAlignment,
                 )
-
-                if (transient.customizeOpen) {
-                    CustomizeSheet(
-                        settings = settings,
-                        onDismiss = viewModel::closeCustomize,
-                        onOpenAppManagement = {
-                            viewModel.closeCustomize()
-                            showAppManagement = true
-                        },
-                        onCustomizeHomescreen = { viewModel.setEditMode(true) },
-                        onSetBackgroundColor = viewModel::setBackgroundColor,
-                        onPickBackgroundImage = viewModel::setBackgroundImage,
-                        onClearBackgroundImage = viewModel::clearBackgroundImage,
-                        onSetTextSize = viewModel::setTextSize,
-                        onSetTextColor = viewModel::setTextColor,
-                        onPickFont = viewModel::setFont,
-                        onClearFont = viewModel::clearFont,
-                    )
-                }
             }
+            Spacer(Modifier.height(BottomBarHeight))
+        }
 
+        // Layer 2: the Customize overlay. Its scrim covers the whole screen —
+        // including behind the bottom bar, which is drawn on top of it.
+        if (transient.customizeOpen) {
+            CustomizeSheet(
+                settings = settings,
+                fontFamily = fontFamily,
+                onDismiss = viewModel::closeCustomize,
+                onOpenHideApps = {
+                    viewModel.closeCustomize()
+                    showHideApps = true
+                },
+                onCustomizeHomescreen = { viewModel.setEditMode(true) },
+                onSetBackgroundColor = { argb ->
+                    viewModel.setBackgroundColor(argb)
+                    // Picking a color replaces a previously set image.
+                    if (settings.bgImagePath != null) viewModel.clearBackgroundImage()
+                },
+                onPickBackgroundImage = viewModel::setBackgroundImage,
+                onSetTextSize = viewModel::setTextSize,
+                onSetTextColor = viewModel::setTextColor,
+                onPickFont = viewModel::setFont,
+                onSetTextColorByUsage = viewModel::setTextColorByUsage,
+            )
+        }
+
+        // Layer 3: the bottom bar, above the scrim.
+        Box(
+            Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .safeDrawingPadding()
+        ) {
             BottomBar(
                 searchOpen = transient.searchOpen,
                 editMode = transient.editMode,
+                customizeOpen = transient.customizeOpen,
                 query = transient.query,
                 textColor = textColor,
                 fontFamily = fontFamily,
@@ -161,35 +195,23 @@ fun VerbumApp(viewModel: VerbumViewModel) {
                 onExitEditMode = { viewModel.setEditMode(false) },
             )
         }
+
+        // Layer 4: the full-screen Hide-apps view, above everything.
+        if (showHideApps) {
+            HideAppsScreen(
+                visibleApps = state.manageableApps.filter { !it.hidden }.map { it.app },
+                hiddenApps = state.hiddenApps,
+                onDismiss = { showHideApps = false },
+                onSetHidden = { app, hidden ->
+                    if (hidden) viewModel.hideApp(app) else viewModel.unhideApp(app)
+                },
+            )
+        }
     }
 
     // ------------------------------------------------------------------
-    // Overlays & dialogs
+    // Dialogs
     // ------------------------------------------------------------------
-
-    if (showAppManagement) {
-        AppManagementScreen(
-            apps = state.manageableApps,
-            folders = state.folders,
-            onDismiss = { showAppManagement = false },
-            onRename = viewModel::renameApp,
-            onSetHidden = { app, hidden ->
-                if (hidden) viewModel.hideApp(app) else viewModel.unhideApp(app)
-            },
-            onMove = viewModel::moveAppToFolder,
-        )
-    }
-
-    menuApp?.let { app ->
-        AppContextMenuDialog(
-            app = app,
-            onDismiss = { menuApp = null },
-            onOpen = { menuApp = null; viewModel.launchApp(app) },
-            onRename = { menuApp = null; renameTarget = app },
-            onMove = { menuApp = null; moveTarget = app },
-            onHide = { menuApp = null; viewModel.hideApp(app) },
-        )
-    }
 
     renameTarget?.let { app ->
         TextInputDialog(
@@ -201,18 +223,6 @@ fun VerbumApp(viewModel: VerbumViewModel) {
             onConfirm = { newName ->
                 viewModel.renameApp(app, newName.ifBlank { null })
                 renameTarget = null
-            },
-        )
-    }
-
-    moveTarget?.let { app ->
-        MoveToFolderDialog(
-            app = app,
-            folders = state.folders,
-            onDismiss = { moveTarget = null },
-            onMove = { folderId ->
-                viewModel.moveAppToFolder(app, folderId)
-                moveTarget = null
             },
         )
     }

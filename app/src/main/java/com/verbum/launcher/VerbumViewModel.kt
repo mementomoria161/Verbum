@@ -64,14 +64,25 @@ class VerbumViewModel(application: Application) : AndroidViewModel(application) 
         settings: VerbumSettings,
         t: TransientState,
     ): UiState {
-        fun applyRename(app: AppInfo) =
-            settings.renames[app.key]?.let { app.copy(label = it) } ?: app
+        // Usage-based opacity: most-used app -> 1.0, unused -> 0.3, linear between.
+        val maxUsage = settings.usageCounts.values.maxOrNull() ?: 0
+        fun usageAlpha(key: String): Float {
+            if (!settings.textColorByUsage || maxUsage <= 0) return 1f
+            val count = settings.usageCounts[key] ?: 0
+            return 0.3f + 0.7f * (count.toFloat() / maxUsage)
+        }
 
-        val visible = installed
-            .filter { it.key !in settings.hidden }
+        fun applyRename(app: AppInfo): AppInfo {
+            val renamed = settings.renames[app.key]?.let { app.copy(label = it) } ?: app
+            return renamed.copy(usageAlpha = usageAlpha(app.key))
+        }
+
+        val allApps = installed
             .map(::applyRename)
             .sortedBy { it.label.lowercase() }
-        val byKey = visible.associateBy { it.key }
+        val visible = allApps.filter { it.key !in settings.hidden }
+        val visibleByKey = visible.associateBy { it.key }
+        val allByKey = allApps.associateBy { it.key }
 
         val keysInFolders = settings.elements
             .filterNot { it.isAllApps }
@@ -79,16 +90,20 @@ class VerbumViewModel(application: Application) : AndroidViewModel(application) 
             .toSet()
 
         val query = t.query.trim()
+        // While actively searching, hidden apps are included and searched too.
+        val searching = t.searchOpen && query.isNotEmpty()
         fun searchFilter(apps: List<AppInfo>) =
-            if (t.searchOpen && query.isNotEmpty()) {
+            if (searching) {
                 apps.filter { it.label.contains(query, ignoreCase = true) }
             } else apps
 
         val elements = settings.elements.map { el ->
             val members = if (el.isAllApps) {
-                visible.filter { it.key !in keysInFolders }
+                (if (searching) allApps else visible).filter { it.key !in keysInFolders }
             } else {
-                el.apps.mapNotNull { byKey[it] }.sortedBy { it.label.lowercase() }
+                el.apps
+                    .mapNotNull { (if (searching) allByKey else visibleByKey)[it] }
+                    .sortedBy { it.label.lowercase() }
             }
             ElementUi(el, searchFilter(members))
         }
@@ -133,6 +148,7 @@ class VerbumViewModel(application: Application) : AndroidViewModel(application) 
 
     fun launchApp(app: AppInfo) {
         appRepo.launch(app)
+        viewModelScope.launch { settingsRepo.recordLaunch(app.key) }
         closeSearch()
     }
 
@@ -196,6 +212,21 @@ class VerbumViewModel(application: Application) : AndroidViewModel(application) 
             settingsRepo.updateElement(id) { it.copy(width = width, height = height) }
         }
 
+    fun toggleElementSingleColumn(id: String) =
+        viewModelScope.launch {
+            settingsRepo.updateElement(id) { it.copy(singleColumn = !it.singleColumn) }
+        }
+
+    fun toggleElementShowName(id: String) =
+        viewModelScope.launch {
+            settingsRepo.updateElement(id) { it.copy(showName = !it.showName) }
+        }
+
+    fun cycleElementAlignment(id: String) =
+        viewModelScope.launch {
+            settingsRepo.updateElement(id) { it.copy(alignment = (it.alignment + 1) % 3) }
+        }
+
     // ------------------------------------------------------------------
     // Appearance
     // ------------------------------------------------------------------
@@ -206,6 +237,12 @@ class VerbumViewModel(application: Application) : AndroidViewModel(application) 
 
     fun setBackgroundColor(argb: Long) =
         viewModelScope.launch { settingsRepo.setBackgroundColor(argb) }
+
+    fun setShowFolderNames(show: Boolean) =
+        viewModelScope.launch { settingsRepo.setShowFolderNames(show) }
+
+    fun setTextColorByUsage(enabled: Boolean) =
+        viewModelScope.launch { settingsRepo.setTextColorByUsage(enabled) }
 
     fun setBackgroundImage(uri: Uri) =
         viewModelScope.launch { settingsRepo.setBackgroundImage(uri) }

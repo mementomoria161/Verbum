@@ -24,7 +24,17 @@ data class GridElement(
     val height: Int = 6,
     val isAllApps: Boolean = false,
     val apps: List<String> = emptyList(),
+    /** When true, app names are laid out one per line instead of flowing. */
+    val singleColumn: Boolean = false,
+    /** Whether this block's name is shown above it on the homescreen. */
+    val showName: Boolean = true,
+    /** Horizontal alignment of the app names: 0 = left, 1 = center, 2 = right. */
+    val alignment: Int = 1,
 )
+
+const val ALIGN_LEFT = 0
+const val ALIGN_CENTER = 1
+const val ALIGN_RIGHT = 2
 
 fun defaultLayout(): List<GridElement> = listOf(
     GridElement(id = ALL_APPS_ID, isAllApps = true)
@@ -36,6 +46,8 @@ data class AppInfo(
     val packageName: String,
     val activityClass: String,
     val label: String,
+    /** Text opacity in [0,1] derived from recent usage (1 when the feature is off). */
+    val usageAlpha: Float = 1f,
 )
 
 /** Everything the user can persist: layout, app management, and appearance. */
@@ -50,4 +62,10 @@ data class VerbumSettings(
     val fontPath: String? = null,
     /** The typographic family name read from the imported font file. */
     val fontName: String? = null,
+    /** Whether folder names are shown above their blocks on the homescreen. */
+    val showFolderNames: Boolean = true,
+    /** Fade app names by how often they were opened in the last 30 days. */
+    val textColorByUsage: Boolean = false,
+    /** appKey -> number of launches in the last 30 days. */
+    val usageCounts: Map<String, Int> = emptyMap(),
 )
