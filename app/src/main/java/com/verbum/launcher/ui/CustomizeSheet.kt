@@ -39,7 +39,6 @@ import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -49,6 +48,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -71,6 +71,7 @@ import androidx.compose.ui.unit.sp
 import com.verbum.launcher.R
 import com.verbum.launcher.model.AppInfo
 import com.verbum.launcher.model.VerbumSettings
+import kotlinx.coroutines.flow.first
 import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.roundToInt
@@ -157,6 +158,19 @@ fun CustomizeSheet(
     // Keep the tap handler fresh: pointerInput(Unit) captures it only once.
     val latestScrimTap by rememberUpdatedState(onScrimTap)
 
+    // Hide apps opens fully scrolled down (Visible resting by the Done button,
+    // Hidden running off the top); every other screen opens at the top. Wait for
+    // the new content to be measured before jumping so maxValue is up to date.
+    val scrollState = rememberScrollState()
+    LaunchedEffect(screen) {
+        if (screen is CustomizeScreen.HideApps) {
+            snapshotFlow { scrollState.maxValue }.first { it > 0 }
+            scrollState.scrollTo(scrollState.maxValue)
+        } else {
+            scrollState.scrollTo(0)
+        }
+    }
+
     Box(Modifier.fillMaxSize()) {
         Box(
             Modifier
@@ -165,19 +179,15 @@ fun CustomizeSheet(
                 .pointerInput(Unit) { detectTapGestures { latestScrimTap() } }
         )
 
-        // The pills and the (short) color picker float up from just above the
-        // bottom bar; the Hide-apps list fills the screen. In every case the
-        // safe-area and bottom-bar insets are applied *inside* the scroll, so
-        // the content scrolls edge-to-edge — under the status bar and under the
-        // floating Done button — with no fixed dark bands clipping it.
-        val bottomAligned = screen is CustomizeScreen.Pills || screen is CustomizeScreen.Color
+        // Every screen floats up from just above the bottom bar. The safe-area
+        // and bottom-bar insets are applied *inside* the scroll, so the content
+        // scrolls edge-to-edge — under the status bar and under the floating
+        // Done button — with no fixed dark bands clipping it.
         Column(
             Modifier
-                .then(
-                    if (bottomAligned) Modifier.align(Alignment.BottomCenter).fillMaxWidth()
-                    else Modifier.fillMaxSize()
-                )
-                .verticalScroll(rememberScrollState())
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .verticalScroll(scrollState)
                 .safeDrawingPadding()
                 .padding(bottom = BottomBarHeight)
                 .padding(horizontal = 12.dp, vertical = 12.dp),
@@ -279,21 +289,30 @@ private fun HideAppsContent(
     hiddenApps: List<AppInfo>,
     onSetHidden: (AppInfo, Boolean) -> Unit,
 ) {
+    var shown by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) { shown = true }
+    val count = 2
+
+    // Visible sits at the bottom (nearest the button); Hidden floats above it.
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        AppsFolder(
-            title = "Visible",
-            icon = R.drawable.ic_visibility,
-            emptyHint = "All apps are hidden.",
-            apps = visibleApps,
-            onAppClick = { onSetHidden(it, true) },
-        )
-        AppsFolder(
-            title = "Hidden",
-            icon = R.drawable.ic_visibility_off,
-            emptyHint = "No hidden apps. Tap an app above to hide it.",
-            apps = hiddenApps,
-            onAppClick = { onSetHidden(it, false) },
-        )
+        AnimatedInPill(index = 0, count = count, shown = shown) {
+            AppsFolder(
+                title = "Hidden",
+                icon = R.drawable.ic_visibility_off,
+                emptyHint = "No hidden apps. Tap an app below to hide it.",
+                apps = hiddenApps,
+                onAppClick = { onSetHidden(it, false) },
+            )
+        }
+        AnimatedInPill(index = 1, count = count, shown = shown) {
+            AppsFolder(
+                title = "Visible",
+                icon = R.drawable.ic_visibility,
+                emptyHint = "All apps are hidden.",
+                apps = visibleApps,
+                onAppClick = { onSetHidden(it, true) },
+            )
+        }
     }
 }
 
@@ -369,30 +388,39 @@ private fun ColorContent(
     onSetTextColor: (Long) -> Unit,
     onSetTextColorByUsage: (Boolean) -> Unit,
 ) {
+    var shown by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) { shown = true }
+    // Text has one extra option below the picker; Background is just the picker.
+    val hasUsage = target == PickerTarget.TEXT
+    val count = if (hasUsage) 2 else 1
+
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        // Just the picker — no headline; the tapped pill already names the target.
-        Surface(
-            shape = RoundedCornerShape(28.dp),
-            color = MaterialTheme.colorScheme.surfaceVariant,
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            Column(Modifier.padding(20.dp)) {
-                ColorPickerPanel(
-                    initialColor = if (target == PickerTarget.BACKGROUND) settings.bgColor
-                    else settings.textColor,
-                    presets = palette,
-                    onColorChange = if (target == PickerTarget.BACKGROUND) onSetBackgroundColor
-                    else onSetTextColor,
-                )
+        AnimatedInPill(index = 0, count = count, shown = shown) {
+            // Just the picker — no headline; the tapped pill already names the target.
+            Surface(
+                shape = RoundedCornerShape(28.dp),
+                color = MaterialTheme.colorScheme.surfaceVariant,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Column(Modifier.padding(20.dp)) {
+                    ColorPickerPanel(
+                        initialColor = if (target == PickerTarget.BACKGROUND) settings.bgColor
+                        else settings.textColor,
+                        presets = palette,
+                        onColorChange = if (target == PickerTarget.BACKGROUND) onSetBackgroundColor
+                        else onSetTextColor,
+                    )
+                }
             }
         }
-        // Text has one extra option, shown as its own Bare pill (title +
-        // sub-line) to match the Edit-layout / Hide-apps rows.
-        if (target == PickerTarget.TEXT) {
-            UsagePill(
-                enabled = settings.textColorByUsage,
-                onToggle = onSetTextColorByUsage,
-            )
+        // Its own Bare pill (title + sub-line) to match the action rows.
+        if (hasUsage) {
+            AnimatedInPill(index = 1, count = count, shown = shown) {
+                UsagePill(
+                    enabled = settings.textColorByUsage,
+                    onToggle = onSetTextColorByUsage,
+                )
+            }
         }
     }
 }
@@ -406,9 +434,13 @@ private fun PillCard(
     modifier: Modifier,
     badgeColor: Color,
     onClick: (() -> Unit)? = null,
+    // Defaults to a faint hairline; pass a color to match the badge fill.
+    badgeBorderColor: Color? = null,
     badgeContent: @Composable BoxScope.() -> Unit = {},
     content: @Composable RowScope.() -> Unit,
 ) {
+    val borderColor = badgeBorderColor
+        ?: MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f)
     // The row of badge + text. Kept as one lambda so the clickable and plain
     // variants share it.
     val body: @Composable () -> Unit = {
@@ -423,7 +455,7 @@ private fun PillCard(
                     .size(BADGE_SIZE)
                     .clip(CircleShape)
                     .background(badgeColor)
-                    .border(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f), CircleShape),
+                    .border(1.dp, borderColor, CircleShape),
                 contentAlignment = Alignment.Center,
                 content = badgeContent,
             )
@@ -489,7 +521,11 @@ private fun ActionPill(
     }
 }
 
-/** The "opacity by usage" toggle, styled as a Bare pill like the action rows. */
+/**
+ * The "opacity by usage" toggle. The whole pill is the button (Bare-style, like
+ * the action rows); when enabled the icon badge lights up and the sub-line flips
+ * to describe the active state.
+ */
 @Composable
 private fun UsagePill(
     enabled: Boolean,
@@ -499,12 +535,17 @@ private fun UsagePill(
         modifier = Modifier
             .fillMaxWidth()
             .height(PILL_HEIGHT),
-        badgeColor = MaterialTheme.colorScheme.surfaceContainer,
+        // Active: the badge glows in the same accent the Done button uses.
+        badgeColor = if (enabled) MaterialTheme.colorScheme.primary
+        else MaterialTheme.colorScheme.surfaceContainer,
+        badgeBorderColor = if (enabled) MaterialTheme.colorScheme.primary else null,
+        onClick = { onToggle(!enabled) },
         badgeContent = {
             Icon(
-                painter = painterResource(R.drawable.ic_visibility),
+                painter = painterResource(R.drawable.ic_opacity),
                 contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                tint = if (enabled) MaterialTheme.colorScheme.onPrimary
+                else MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.size(24.dp),
             )
         },
@@ -513,15 +554,13 @@ private fun UsagePill(
             PillTitle("Opacity by usage")
             Spacer(Modifier.height(4.dp))
             Text(
-                "Fade rarely-used apps",
+                if (enabled) "Fade rarely-used apps" else "Don't fade rarely-used apps",
                 fontSize = 14.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
         }
-        Spacer(Modifier.width(12.dp))
-        Switch(checked = enabled, onCheckedChange = onToggle)
     }
 }
 

@@ -4,8 +4,8 @@
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <!-- A simple typographic "V" mark. -->
+    <!-- Logo "V" mark from Logo.svg -->
     <path
-        android:fillColor="#E6E1E5"
-        android:pathData="M33,38 L41.5,38 L54,63.5 L66.5,38 L75,38 L58,72 L50,72 Z" />
+        android:fillColor="#B9B9B9"
+        android:pathData="M45.145,44.362 H48.289 L54.089,59.215 L59.808,44.362 H62.898 L54.116,66.073 Z" />
 </vector>
