@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -66,10 +67,15 @@ fun VerbumApp(viewModel: VerbumViewModel) {
     var renameTarget by remember { mutableStateOf<AppInfo?>(null) }
     var elementRenameTarget by remember { mutableStateOf<GridElement?>(null) }
     var showAddFolder by remember { mutableStateOf(false) }
-    var showHideApps by remember { mutableStateOf(false) }
+    // Which panel the Customize overlay shows (pills / hide apps / color).
+    var customizeScreen by remember { mutableStateOf<CustomizeScreen>(CustomizeScreen.Pills) }
+    // Color to restore if the user cancels a color selection.
+    var colorRevert by remember { mutableLongStateOf(0L) }
+    val inSubScreen = transient.customizeOpen && customizeScreen != CustomizeScreen.Pills
 
     BackHandler(enabled = transient.searchOpen || transient.editMode || transient.customizeOpen) {
         when {
+            inSubScreen -> customizeScreen = CustomizeScreen.Pills
             transient.customizeOpen -> viewModel.closeCustomize()
             transient.searchOpen -> viewModel.closeSearch()
             transient.editMode -> viewModel.setEditMode(false)
@@ -127,6 +133,10 @@ fun VerbumApp(viewModel: VerbumViewModel) {
                         menuAppKey = null
                         viewModel.moveAppToFolder(app, folderId)
                     },
+                    onAppDelete = { app ->
+                        menuAppKey = null
+                        viewModel.uninstallApp(app)
+                    },
                     onEnterEditMode = { viewModel.setEditMode(true) },
                     onElementMove = viewModel::moveElement,
                     onElementResize = viewModel::resizeElement,
@@ -146,10 +156,20 @@ fun VerbumApp(viewModel: VerbumViewModel) {
             CustomizeSheet(
                 settings = settings,
                 fontFamily = fontFamily,
-                onDismiss = viewModel::closeCustomize,
-                onOpenHideApps = {
-                    viewModel.closeCustomize()
-                    showHideApps = true
+                screen = customizeScreen,
+                visibleApps = state.manageableApps.filter { !it.hidden }.map { it.app },
+                hiddenApps = state.hiddenApps,
+                onScrimTap = {
+                    if (inSubScreen) customizeScreen = CustomizeScreen.Pills
+                    else viewModel.closeCustomize()
+                },
+                onOpenHideApps = { customizeScreen = CustomizeScreen.HideApps },
+                onOpenColorPicker = { target ->
+                    colorRevert = when (target) {
+                        PickerTarget.BACKGROUND -> settings.bgColor
+                        PickerTarget.TEXT -> settings.textColor
+                    }
+                    customizeScreen = CustomizeScreen.Color(target)
                 },
                 onCustomizeHomescreen = { viewModel.setEditMode(true) },
                 onSetBackgroundColor = { argb ->
@@ -161,7 +181,11 @@ fun VerbumApp(viewModel: VerbumViewModel) {
                 onSetTextSize = viewModel::setTextSize,
                 onSetTextColor = viewModel::setTextColor,
                 onPickFont = viewModel::setFont,
+                onClearFont = viewModel::clearFont,
                 onSetTextColorByUsage = viewModel::setTextColorByUsage,
+                onSetHidden = { app, hidden ->
+                    if (hidden) viewModel.hideApp(app) else viewModel.unhideApp(app)
+                },
             )
         }
 
@@ -176,6 +200,7 @@ fun VerbumApp(viewModel: VerbumViewModel) {
                 searchOpen = transient.searchOpen,
                 editMode = transient.editMode,
                 customizeOpen = transient.customizeOpen,
+                settingsSubActive = inSubScreen,
                 query = transient.query,
                 textColor = textColor,
                 fontFamily = fontFamily,
@@ -188,23 +213,25 @@ fun VerbumApp(viewModel: VerbumViewModel) {
                     matches.singleOrNull()?.let(viewModel::launchApp)
                 },
                 onOpenCustomize = {
-                    if (transient.customizeOpen) viewModel.closeCustomize()
-                    else viewModel.openCustomize()
+                    if (transient.customizeOpen) {
+                        viewModel.closeCustomize()
+                    } else {
+                        customizeScreen = CustomizeScreen.Pills
+                        viewModel.openCustomize()
+                    }
                 },
                 onAddFolder = { showAddFolder = true },
-                onExitEditMode = { viewModel.setEditMode(false) },
-            )
-        }
-
-        // Layer 4: the full-screen Hide-apps view, above everything.
-        if (showHideApps) {
-            HideAppsScreen(
-                visibleApps = state.manageableApps.filter { !it.hidden }.map { it.app },
-                hiddenApps = state.hiddenApps,
-                onDismiss = { showHideApps = false },
-                onSetHidden = { app, hidden ->
-                    if (hidden) viewModel.hideApp(app) else viewModel.unhideApp(app)
+                onSettingsDone = { customizeScreen = CustomizeScreen.Pills },
+                onSettingsCancel = (customizeScreen as? CustomizeScreen.Color)?.let { colorScreen ->
+                    {
+                        when (colorScreen.target) {
+                            PickerTarget.BACKGROUND -> viewModel.setBackgroundColor(colorRevert)
+                            PickerTarget.TEXT -> viewModel.setTextColor(colorRevert)
+                        }
+                        customizeScreen = CustomizeScreen.Pills
+                    }
                 },
+                onExitEditMode = { viewModel.setEditMode(false) },
             )
         }
     }

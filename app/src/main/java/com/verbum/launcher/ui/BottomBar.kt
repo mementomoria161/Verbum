@@ -59,6 +59,7 @@ fun BottomBar(
     searchOpen: Boolean,
     editMode: Boolean,
     customizeOpen: Boolean,
+    settingsSubActive: Boolean,
     query: String,
     textColor: Color,
     fontFamily: FontFamily?,
@@ -68,6 +69,8 @@ fun BottomBar(
     onSearchSubmit: () -> Unit,
     onOpenCustomize: () -> Unit,
     onAddFolder: () -> Unit,
+    onSettingsDone: () -> Unit,
+    onSettingsCancel: (() -> Unit)?,
     onExitEditMode: () -> Unit,
 ) {
     // The background that fades in (matches the settings menu pill color).
@@ -92,6 +95,60 @@ fun BottomBar(
         contentAlignment = Alignment.Center,
     ) {
         when {
+            // A settings sub-screen (Hide apps / color picker) is open. The bar
+            // becomes a Done button — plus a Cancel segment when the screen
+            // supports reverting (the color picker).
+            settingsSubActive -> {
+                Row(
+                    Modifier.height(56.dp),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    if (onSettingsCancel != null) {
+                        Button(
+                            onClick = onSettingsCancel,
+                            modifier = Modifier.fillMaxHeight(),
+                            shape = bigStart,
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = visibleColor,
+                                contentColor = textColor,
+                            ),
+                            elevation = null,
+                            contentPadding = PaddingValues(horizontal = 24.dp),
+                        ) {
+                            Icon(
+                                painter = painterResource(R.drawable.ic_close),
+                                contentDescription = null,
+                                modifier = Modifier.size(20.dp),
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Text("Cancel", style = labelStyle)
+                        }
+                    }
+                    Button(
+                        onClick = onSettingsDone,
+                        modifier = Modifier.fillMaxHeight(),
+                        shape = if (onSettingsCancel != null) smallEnd else RoundedCornerShape(28.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.primary,
+                            contentColor = MaterialTheme.colorScheme.onPrimary,
+                        ),
+                        elevation = null,
+                        contentPadding = PaddingValues(horizontal = 24.dp),
+                    ) {
+                        Icon(
+                            painter = painterResource(R.drawable.ic_check_circle),
+                            contentDescription = null,
+                            modifier = Modifier.size(20.dp),
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            "Done",
+                            style = labelStyle.copy(color = MaterialTheme.colorScheme.onPrimary),
+                        )
+                    }
+                }
+            }
+
             editMode -> {
                 Row(
                     Modifier.height(56.dp),

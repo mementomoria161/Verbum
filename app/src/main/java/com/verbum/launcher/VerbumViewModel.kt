@@ -187,6 +187,9 @@ class VerbumViewModel(application: Application) : AndroidViewModel(application) 
     fun moveAppToFolder(app: AppInfo, folderId: String?) =
         viewModelScope.launch { settingsRepo.moveAppToFolder(app.key, folderId) }
 
+    /** Launches the system uninstall flow for the app. */
+    fun uninstallApp(app: AppInfo) = appRepo.uninstall(app)
+
     // ------------------------------------------------------------------
     // Grid layout
     // ------------------------------------------------------------------

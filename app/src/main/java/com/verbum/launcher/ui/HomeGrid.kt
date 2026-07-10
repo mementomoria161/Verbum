@@ -95,6 +95,7 @@ fun HomeGrid(
     onAppRename: (AppInfo) -> Unit,
     onAppHide: (AppInfo) -> Unit,
     onAppMove: (AppInfo, String?) -> Unit,
+    onAppDelete: (AppInfo) -> Unit,
     onEnterEditMode: () -> Unit,
     onElementMove: (id: String, col: Int, row: Int) -> Unit,
     onElementResize: (id: String, width: Int, height: Int) -> Unit,
@@ -177,6 +178,7 @@ fun HomeGrid(
                             onAppRename = onAppRename,
                             onAppHide = onAppHide,
                             onAppMove = onAppMove,
+                            onAppDelete = onAppDelete,
                             onMove = { c, r ->
                                 if (!overlaps(el.id, c, r, el.width, el.height)) {
                                     onElementMove(el.id, c, r)
@@ -221,6 +223,7 @@ private fun ElementBlock(
     onAppRename: (AppInfo) -> Unit,
     onAppHide: (AppInfo) -> Unit,
     onAppMove: (AppInfo, String?) -> Unit,
+    onAppDelete: (AppInfo) -> Unit,
     onMove: (col: Int, row: Int) -> Unit,
     onResize: (width: Int, height: Int) -> Unit,
     onDelete: () -> Unit,
@@ -340,6 +343,7 @@ private fun ElementBlock(
                                     onRename = { onAppRename(app) },
                                     onHide = { onAppHide(app) },
                                     onMove = { folderId -> onAppMove(app, folderId) },
+                                    onDelete = { onAppDelete(app) },
                                 )
                             }
                         }
@@ -377,18 +381,19 @@ private fun ElementBlock(
                     }
             )
 
-            // Per-folder control cluster: one-per-line, name visibility,
-            // and text alignment.
-            Row(
-                Modifier
-                    .align(Alignment.TopStart)
-                    .padding(8.dp),
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-            ) {
+            // Per-folder control cluster: one-per-line, name visibility, and
+            // text alignment. Laid out vertically so it does not cover the
+            // (top) title — unless the block is too short to stack them, in
+            // which case it falls back to a horizontal row.
+            val handleCount = 2 + if (el.name.isNotBlank()) 1 else 0
+            val neededHeight =
+                (handleCount * EDIT_HANDLE_SIZE.value + (handleCount - 1) * 6 + 16).dp
+            val stackVertically = heightDp >= neededHeight
+
+            val handles: @Composable () -> Unit = {
                 EditHandle(
                     icon = R.drawable.ic_paragraph,
                     active = el.singleColumn,
-                    accentColor = accentColor,
                     contentDescription = "One app per line",
                     onClick = onToggleSingleColumn,
                 )
@@ -397,7 +402,6 @@ private fun ElementBlock(
                         icon = if (el.showName) R.drawable.ic_match_case
                         else R.drawable.ic_match_case_off,
                         active = el.showName,
-                        accentColor = accentColor,
                         contentDescription = "Show folder name",
                         onClick = onToggleShowName,
                     )
@@ -408,11 +412,25 @@ private fun ElementBlock(
                         ALIGN_RIGHT -> R.drawable.ic_align_right
                         else -> R.drawable.ic_align_center
                     },
-                    active = true,
-                    accentColor = accentColor,
+                    active = false,
                     contentDescription = "Text alignment",
                     onClick = onCycleAlignment,
                 )
+            }
+
+            val clusterModifier = Modifier
+                .align(Alignment.TopStart)
+                .padding(8.dp)
+            if (stackVertically) {
+                Column(
+                    clusterModifier,
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) { handles() }
+            } else {
+                Row(
+                    clusterModifier,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) { handles() }
             }
 
             // Delete (folders only — the all-apps block is permanent).
@@ -477,24 +495,25 @@ private fun ElementBlock(
 private fun EditHandle(
     icon: Int,
     active: Boolean,
-    accentColor: Color,
     contentDescription: String,
     onClick: () -> Unit,
 ) {
+    // Bare-style selection highlight: active = primaryContainer, else neutral.
+    val bg = if (active) MaterialTheme.colorScheme.primaryContainer
+    else MaterialTheme.colorScheme.surfaceVariant
+    val fg = if (active) MaterialTheme.colorScheme.onPrimaryContainer
+    else MaterialTheme.colorScheme.onSurfaceVariant
     Box(
         Modifier
             .size(EDIT_HANDLE_SIZE)
-            .background(
-                if (active) accentColor else accentColor.copy(alpha = 0.35f),
-                CircleShape,
-            )
+            .background(bg, CircleShape)
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
         Icon(
             painter = painterResource(icon),
             contentDescription = contentDescription,
-            tint = Color.Black,
+            tint = fg,
             modifier = Modifier.size(EDIT_HANDLE_ICON),
         )
     }
@@ -523,6 +542,7 @@ private fun AppActionMenu(
     onRename: () -> Unit,
     onHide: () -> Unit,
     onMove: (String?) -> Unit,
+    onDelete: () -> Unit,
 ) {
     var showFolders by remember { mutableStateOf(false) }
     val marginPx = with(LocalDensity.current) { 8.dp.roundToPx() }
@@ -591,9 +611,10 @@ private fun AppActionMenu(
             Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 MenuSegment(R.drawable.ic_edit, "Rename", SEGMENT_START, onRename)
                 MenuSegment(R.drawable.ic_visibility_off, "Hide", SEGMENT_MIDDLE, onHide)
-                MenuSegment(R.drawable.ic_folder, "Folder", SEGMENT_END) {
+                MenuSegment(R.drawable.ic_folder, "Folder", SEGMENT_MIDDLE) {
                     showFolders = !showFolders
                 }
+                MenuSegment(R.drawable.ic_delete, "Delete", SEGMENT_END, onDelete)
             }
         }
     }
@@ -645,7 +666,7 @@ private fun MenuSegment(
             Modifier
                 .clickable(onClick = onClick)
                 .height(56.dp)
-                .padding(horizontal = 16.dp),
+                .padding(horizontal = 14.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             if (icon != null) {
@@ -654,7 +675,7 @@ private fun MenuSegment(
                     contentDescription = null,
                     modifier = Modifier.size(20.dp),
                 )
-                Spacer(Modifier.width(8.dp))
+                Spacer(Modifier.width(6.dp))
             }
             Text(label, fontSize = 14.sp, maxLines = 1)
         }

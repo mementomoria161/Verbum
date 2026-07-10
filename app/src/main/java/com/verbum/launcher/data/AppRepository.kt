@@ -6,6 +6,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import androidx.core.content.ContextCompat
 import com.verbum.launcher.model.AppInfo
@@ -87,6 +88,18 @@ class AppRepository(private val context: Context) {
         } catch (_: Exception) {
             // App may have been uninstalled between refresh and tap; the
             // package receiver will remove it from the list shortly.
+        }
+    }
+
+    /** Fires the system uninstall dialog for the app's package. */
+    fun uninstall(app: AppInfo) {
+        try {
+            val intent = Intent(Intent.ACTION_DELETE)
+                .setData(Uri.fromParts("package", app.packageName, null))
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            context.startActivity(intent)
+        } catch (_: Exception) {
+            // No uninstaller available, or the package is already gone.
         }
     }
 

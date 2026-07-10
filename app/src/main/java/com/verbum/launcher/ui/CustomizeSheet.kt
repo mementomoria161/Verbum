@@ -33,10 +33,13 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -66,11 +69,21 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.verbum.launcher.R
+import com.verbum.launcher.model.AppInfo
 import com.verbum.launcher.model.VerbumSettings
 import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.roundToInt
 import kotlin.math.sin
+
+enum class PickerTarget { BACKGROUND, TEXT }
+
+/** Which panel the Customize overlay currently shows in the pills' place. */
+sealed interface CustomizeScreen {
+    data object Pills : CustomizeScreen
+    data object HideApps : CustomizeScreen
+    data class Color(val target: PickerTarget) : CustomizeScreen
+}
 
 /** Material 3 color roles offered as presets, from the active (dynamic) scheme. */
 private fun ColorScheme.swatchPalette(): List<Color> = listOf(
@@ -90,39 +103,33 @@ private val PILL_SHAPE = RoundedCornerShape(percent = 50)
 private const val MIN_TEXT_SIZE = 12f
 private const val MAX_TEXT_SIZE = 34f
 
-private enum class PickerTarget { BACKGROUND, TEXT }
-
 /**
- * The Customize overlay, styled after the Bare launcher: a dim scrim plus a
- * bottom-anchored stack of fully-rounded pill cards floating above the bottom
- * bar. Rows: Edit layout, Hide apps, Background (image + color picker), and
- * Text (font + color picker + rotary size dial).
+ * The Customize overlay: a dim scrim plus a bottom-anchored panel floating
+ * above the (still visible) bottom bar. The panel shows one of three screens
+ * in the same place — the settings pills, the Hide-apps folders, or a color
+ * picker — with the bottom bar's button switching to Done for the sub-screens.
  */
 @Composable
 fun CustomizeSheet(
     settings: VerbumSettings,
     fontFamily: FontFamily?,
-    onDismiss: () -> Unit,
+    screen: CustomizeScreen,
+    visibleApps: List<AppInfo>,
+    hiddenApps: List<AppInfo>,
+    onScrimTap: () -> Unit,
     onOpenHideApps: () -> Unit,
+    onOpenColorPicker: (PickerTarget) -> Unit,
     onCustomizeHomescreen: () -> Unit,
     onSetBackgroundColor: (Long) -> Unit,
     onPickBackgroundImage: (Uri) -> Unit,
     onSetTextSize: (Float) -> Unit,
     onSetTextColor: (Long) -> Unit,
     onPickFont: (Uri) -> Unit,
+    onClearFont: () -> Unit,
     onSetTextColorByUsage: (Boolean) -> Unit,
+    onSetHidden: (AppInfo, Boolean) -> Unit,
 ) {
     val palette = MaterialTheme.colorScheme.swatchPalette()
-    var pickerTarget by remember { mutableStateOf<PickerTarget?>(null) }
-
-    // Trigger the Bare-style staggered entrance on first composition.
-    var shown by remember { mutableStateOf(false) }
-    LaunchedEffect(Unit) { shown = true }
-    val scrimAlpha by animateFloatAsState(
-        targetValue = if (shown) 1f else 0f,
-        animationSpec = tween(250),
-        label = "scrimAlpha",
-    )
 
     val imagePicker = rememberLauncherForActivityResult(
         ActivityResultContracts.GetContent()
@@ -132,137 +139,261 @@ fun CustomizeSheet(
         ActivityResultContracts.OpenDocument()
     ) { uri -> uri?.let(onPickFont) }
 
+    fun launchFontPicker() = fontPicker.launch(
+        arrayOf(
+            "font/ttf", "font/otf",
+            "application/x-font-ttf", "application/x-font-otf",
+            "application/octet-stream",
+        )
+    )
+
+    var shown by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) { shown = true }
+    val scrimAlpha by animateFloatAsState(
+        targetValue = if (shown) 1f else 0f,
+        animationSpec = tween(250),
+        label = "scrimAlpha",
+    )
+    // Keep the tap handler fresh: pointerInput(Unit) captures it only once.
+    val latestScrimTap by rememberUpdatedState(onScrimTap)
+
     Box(Modifier.fillMaxSize()) {
-        // Dim scrim — fades in, tap anywhere off the pills to close.
         Box(
             Modifier
                 .fillMaxSize()
                 .background(Color.Black.copy(alpha = 0.5f * scrimAlpha))
-                .pointerInput(Unit) { detectTapGestures { onDismiss() } }
+                .pointerInput(Unit) { detectTapGestures { latestScrimTap() } }
         )
 
-        val pillCount = 4
+        // The pills and the (short) color picker float up from just above the
+        // bottom bar; the Hide-apps list fills the screen. In every case the
+        // safe-area and bottom-bar insets are applied *inside* the scroll, so
+        // the content scrolls edge-to-edge — under the status bar and under the
+        // floating Done button — with no fixed dark bands clipping it.
+        val bottomAligned = screen is CustomizeScreen.Pills || screen is CustomizeScreen.Color
         Column(
             Modifier
-                .align(Alignment.BottomCenter)
-                .fillMaxWidth()
-                .safeDrawingPadding()
-                // Keep the pill stack above the bottom bar, which stays visible.
-                .padding(bottom = BottomBarHeight)
+                .then(
+                    if (bottomAligned) Modifier.align(Alignment.BottomCenter).fillMaxWidth()
+                    else Modifier.fillMaxSize()
+                )
                 .verticalScroll(rememberScrollState())
+                .safeDrawingPadding()
+                .padding(bottom = BottomBarHeight)
                 .padding(horizontal = 12.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            // 1. Edit layout
-            AnimatedInPill(index = 0, count = pillCount, shown = shown) {
-                ActionPill(
-                    icon = R.drawable.ic_edit_layout,
-                    title = "Edit layout",
-                    subtitle = "Move and resize blocks, add folders",
-                    onClick = onCustomizeHomescreen,
-                )
-            }
-
-            // 2. Hide apps
-            AnimatedInPill(index = 1, count = pillCount, shown = shown) {
-                ActionPill(
-                    icon = R.drawable.ic_visibility_off,
-                    title = "Hide apps",
-                    subtitle = "Tap apps to hide or unhide them",
-                    onClick = onOpenHideApps,
-                )
-            }
-
-            // 3. Background: thumbnail badge + image upload + color picker.
-            AnimatedInPill(index = 2, count = pillCount, shown = shown) {
-                BackgroundPill(
-                    settings = settings,
-                    onPickImage = { imagePicker.launch("image/*") },
-                    onOpenColorPicker = { pickerTarget = PickerTarget.BACKGROUND },
-                )
-            }
-
-            // 4. Text: font preview badge, font/color buttons, size dial.
-            AnimatedInPill(index = 3, count = pillCount, shown = shown) {
-                TextPill(
+            when (screen) {
+                is CustomizeScreen.Pills -> PillsContent(
                     settings = settings,
                     fontFamily = fontFamily,
-                    onPickFont = {
-                        fontPicker.launch(
-                            arrayOf(
-                                "font/ttf", "font/otf",
-                                "application/x-font-ttf", "application/x-font-otf",
-                                "application/octet-stream",
-                            )
-                        )
-                    },
-                    onOpenColorPicker = { pickerTarget = PickerTarget.TEXT },
+                    onOpenHideApps = onOpenHideApps,
+                    onCustomizeHomescreen = onCustomizeHomescreen,
+                    onOpenColorPicker = onOpenColorPicker,
+                    onPickImage = { imagePicker.launch("image/*") },
+                    onPickFont = { launchFontPicker() },
+                    onClearFont = onClearFont,
                     onSetTextSize = onSetTextSize,
+                )
+
+                is CustomizeScreen.HideApps -> HideAppsContent(
+                    visibleApps = visibleApps,
+                    hiddenApps = hiddenApps,
+                    onSetHidden = onSetHidden,
+                )
+
+                is CustomizeScreen.Color -> ColorContent(
+                    target = screen.target,
+                    settings = settings,
+                    palette = palette,
+                    onSetBackgroundColor = onSetBackgroundColor,
+                    onSetTextColor = onSetTextColor,
+                    onSetTextColorByUsage = onSetTextColorByUsage,
                 )
             }
         }
     }
+}
 
-    pickerTarget?.let { target ->
-        ColorPickerDialog(
-            initialColor = when (target) {
-                PickerTarget.BACKGROUND -> settings.bgColor
-                PickerTarget.TEXT -> settings.textColor
-            },
-            presets = palette,
-            onDismiss = { pickerTarget = null },
-            onPick = { argb ->
-                when (target) {
-                    PickerTarget.BACKGROUND -> onSetBackgroundColor(argb)
-                    PickerTarget.TEXT -> onSetTextColor(argb)
-                }
-                pickerTarget = null
-            },
-            showUsageOption = target == PickerTarget.TEXT,
-            usageEnabled = settings.textColorByUsage,
-            onToggleUsage = onSetTextColorByUsage,
+// ----------------------------------------------------------------------
+// Screens
+// ----------------------------------------------------------------------
+
+@Composable
+private fun PillsContent(
+    settings: VerbumSettings,
+    fontFamily: FontFamily?,
+    onOpenHideApps: () -> Unit,
+    onCustomizeHomescreen: () -> Unit,
+    onOpenColorPicker: (PickerTarget) -> Unit,
+    onPickImage: () -> Unit,
+    onPickFont: () -> Unit,
+    onClearFont: () -> Unit,
+    onSetTextSize: (Float) -> Unit,
+) {
+    var shown by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) { shown = true }
+    val count = 4
+
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        AnimatedInPill(index = 0, count = count, shown = shown) {
+            ActionPill(
+                icon = R.drawable.ic_edit_layout,
+                title = "Edit layout",
+                subtitle = "Move and resize blocks, add folders",
+                onClick = onCustomizeHomescreen,
+            )
+        }
+        AnimatedInPill(index = 1, count = count, shown = shown) {
+            ActionPill(
+                icon = R.drawable.ic_visibility_off,
+                title = "Hide apps",
+                subtitle = "Move apps between Visible and Hidden",
+                onClick = onOpenHideApps,
+            )
+        }
+        AnimatedInPill(index = 2, count = count, shown = shown) {
+            BackgroundPill(
+                settings = settings,
+                onPickImage = onPickImage,
+                onOpenColorPicker = { onOpenColorPicker(PickerTarget.BACKGROUND) },
+            )
+        }
+        AnimatedInPill(index = 3, count = count, shown = shown) {
+            TextPill(
+                settings = settings,
+                fontFamily = fontFamily,
+                onPickFont = onPickFont,
+                onClearFont = onClearFont,
+                onOpenColorPicker = { onOpenColorPicker(PickerTarget.TEXT) },
+                onSetTextSize = onSetTextSize,
+            )
+        }
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun HideAppsContent(
+    visibleApps: List<AppInfo>,
+    hiddenApps: List<AppInfo>,
+    onSetHidden: (AppInfo, Boolean) -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        AppsFolder(
+            title = "Visible",
+            icon = R.drawable.ic_visibility,
+            emptyHint = "All apps are hidden.",
+            apps = visibleApps,
+            onAppClick = { onSetHidden(it, true) },
+        )
+        AppsFolder(
+            title = "Hidden",
+            icon = R.drawable.ic_visibility_off,
+            emptyHint = "No hidden apps. Tap an app above to hide it.",
+            apps = hiddenApps,
+            onAppClick = { onSetHidden(it, false) },
         )
     }
 }
 
-// Standard "overshoot" easing (Android's OvershootInterpolator, tension 2.2).
-private val OvershootEasing = Easing { fraction ->
-    val t = fraction - 1f
-    t * t * (3.2f * t + 2.2f) + 1f
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun AppsFolder(
+    title: String,
+    icon: Int,
+    emptyHint: String,
+    apps: List<AppInfo>,
+    onAppClick: (AppInfo) -> Unit,
+) {
+    Surface(
+        shape = RoundedCornerShape(28.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    painter = painterResource(icon),
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(20.dp),
+                )
+                Spacer(Modifier.width(10.dp))
+                Text(
+                    title,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.weight(1f),
+                )
+                Text(
+                    "${apps.size}",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            if (apps.isEmpty()) {
+                Text(
+                    emptyHint,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            } else {
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    apps.forEach { app ->
+                        Text(
+                            text = app.label,
+                            style = MaterialTheme.typography.bodyLarge,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(percent = 50))
+                                .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                                .clickable { onAppClick(app) }
+                                .padding(horizontal = 14.dp, vertical = 8.dp),
+                        )
+                    }
+                }
+            }
+        }
+    }
 }
 
-/**
- * Wraps a settings pill in the Bare-style entrance: it scales up from 0.3,
- * rises from below, and fades in, with a bottom-up stagger and overshoot.
- */
 @Composable
-private fun AnimatedInPill(
-    index: Int,
-    count: Int,
-    shown: Boolean,
-    content: @Composable () -> Unit,
+private fun ColorContent(
+    target: PickerTarget,
+    settings: VerbumSettings,
+    palette: List<Color>,
+    onSetBackgroundColor: (Long) -> Unit,
+    onSetTextColor: (Long) -> Unit,
+    onSetTextColorByUsage: (Boolean) -> Unit,
 ) {
-    val delay = 120 + (count - 1 - index) * 60
-    val progress by animateFloatAsState(
-        targetValue = if (shown) 1f else 0f,
-        animationSpec = tween(durationMillis = 280, delayMillis = delay, easing = OvershootEasing),
-        label = "pillProgress",
-    )
-    val alpha by animateFloatAsState(
-        targetValue = if (shown) 1f else 0f,
-        animationSpec = tween(durationMillis = 220, delayMillis = delay),
-        label = "pillAlpha",
-    )
-    val offsetPx = with(LocalDensity.current) { 100.dp.toPx() }
-    Box(
-        Modifier.graphicsLayer {
-            scaleX = 0.3f + progress * 0.7f
-            scaleY = 0.3f + progress * 0.7f
-            translationY = (1f - progress) * offsetPx
-            this.alpha = alpha.coerceIn(0f, 1f)
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        // Just the picker — no headline; the tapped pill already names the target.
+        Surface(
+            shape = RoundedCornerShape(28.dp),
+            color = MaterialTheme.colorScheme.surfaceVariant,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Column(Modifier.padding(20.dp)) {
+                ColorPickerPanel(
+                    initialColor = if (target == PickerTarget.BACKGROUND) settings.bgColor
+                    else settings.textColor,
+                    presets = palette,
+                    onColorChange = if (target == PickerTarget.BACKGROUND) onSetBackgroundColor
+                    else onSetTextColor,
+                )
+            }
         }
-    ) {
-        content()
+        // Text has one extra option, shown as its own Bare pill (title +
+        // sub-line) to match the Edit-layout / Hide-apps rows.
+        if (target == PickerTarget.TEXT) {
+            UsagePill(
+                enabled = settings.textColorByUsage,
+                onToggle = onSetTextColorByUsage,
+            )
+        }
     }
 }
 
@@ -270,10 +401,6 @@ private fun AnimatedInPill(
 // Bare-style building blocks
 // ----------------------------------------------------------------------
 
-/**
- * Base pill: a fully-rounded [surfaceVariant] card with a circular badge on the
- * left and arbitrary [content] filling the rest of the row.
- */
 @Composable
 private fun PillCard(
     modifier: Modifier,
@@ -282,11 +409,9 @@ private fun PillCard(
     badgeContent: @Composable BoxScope.() -> Unit = {},
     content: @Composable RowScope.() -> Unit,
 ) {
-    Surface(
-        shape = PILL_SHAPE,
-        color = MaterialTheme.colorScheme.surfaceVariant,
-        modifier = if (onClick != null) modifier.clickable(onClick = onClick) else modifier,
-    ) {
+    // The row of badge + text. Kept as one lambda so the clickable and plain
+    // variants share it.
+    val body: @Composable () -> Unit = {
         Row(
             Modifier
                 .fillMaxSize()
@@ -305,6 +430,24 @@ private fun PillCard(
             Spacer(Modifier.width(16.dp))
             content()
         }
+    }
+
+    // Use Surface's own onClick so the press ripple is clipped to PILL_SHAPE
+    // rather than the surrounding rectangle (a plain .clickable() modifier is
+    // not bounded by the Surface's shape).
+    if (onClick != null) {
+        Surface(
+            onClick = onClick,
+            shape = PILL_SHAPE,
+            color = MaterialTheme.colorScheme.surfaceVariant,
+            modifier = modifier,
+        ) { body() }
+    } else {
+        Surface(
+            shape = PILL_SHAPE,
+            color = MaterialTheme.colorScheme.surfaceVariant,
+            modifier = modifier,
+        ) { body() }
     }
 }
 
@@ -326,7 +469,6 @@ private fun ActionPill(
                 painter = painterResource(icon),
                 contentDescription = null,
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                // Matches Bare: intrinsic 24dp icon centered in the 96dp badge.
                 modifier = Modifier.size(24.dp),
             )
         },
@@ -344,6 +486,42 @@ private fun ActionPill(
                 )
             }
         }
+    }
+}
+
+/** The "opacity by usage" toggle, styled as a Bare pill like the action rows. */
+@Composable
+private fun UsagePill(
+    enabled: Boolean,
+    onToggle: (Boolean) -> Unit,
+) {
+    PillCard(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(PILL_HEIGHT),
+        badgeColor = MaterialTheme.colorScheme.surfaceContainer,
+        badgeContent = {
+            Icon(
+                painter = painterResource(R.drawable.ic_visibility),
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(24.dp),
+            )
+        },
+    ) {
+        Column(Modifier.weight(1f)) {
+            PillTitle("Opacity by usage")
+            Spacer(Modifier.height(4.dp))
+            Text(
+                "Fade rarely-used apps",
+                fontSize = 14.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        Spacer(Modifier.width(12.dp))
+        Switch(checked = enabled, onCheckedChange = onToggle)
     }
 }
 
@@ -387,16 +565,17 @@ private fun TextPill(
     settings: VerbumSettings,
     fontFamily: FontFamily?,
     onPickFont: () -> Unit,
+    onClearFont: () -> Unit,
     onOpenColorPicker: () -> Unit,
     onSetTextSize: (Float) -> Unit,
 ) {
+    val hasFont = settings.fontPath != null
     PillCard(
         modifier = Modifier
             .fillMaxWidth()
             .height(PILL_HEIGHT),
         badgeColor = MaterialTheme.colorScheme.surfaceContainer,
         badgeContent = {
-            // The badge itself is the rotary size dial.
             FontSizeDial(
                 value = settings.textSizeSp,
                 fontFamily = fontFamily,
@@ -409,10 +588,11 @@ private fun TextPill(
             PillTitle("Text")
             Spacer(Modifier.height(8.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                // Once a font is imported the button clears it back to default.
                 SmallPillButton(
-                    icon = R.drawable.ic_import,
+                    icon = if (hasFont) R.drawable.ic_close else R.drawable.ic_import,
                     label = settings.fontName ?: "Font",
-                    onClick = onPickFont,
+                    onClick = if (hasFont) onClearFont else onPickFont,
                 )
                 SmallPillButton(R.drawable.ic_color_picker, "Color", onOpenColorPicker)
             }
@@ -420,18 +600,6 @@ private fun TextPill(
     }
 }
 
-/**
- * The rotary size dial that fills the Text pill's badge circle: drag around
- * its center to turn it; a full 360° sweep covers the whole size range. A
- * shaded border trail sweeps up to the current position, ending at the
- * selection knob, and the center shows the current size in the selected
- * font and color.
- *
- * The drag state is intentionally NOT keyed on [value]: re-keying would
- * recreate the state on every commit while the long-lived pointerInput
- * coroutine still wrote to the stale instance — the cause of the jerky
- * second rotation. One state instance lives for the dial's lifetime.
- */
 @Composable
 private fun FontSizeDial(
     value: Float,
@@ -443,7 +611,6 @@ private fun FontSizeDial(
     val latestOnCommit by rememberUpdatedState(onCommit)
     val fraction = (current - MIN_TEXT_SIZE) / (MAX_TEXT_SIZE - MIN_TEXT_SIZE)
     val trailColor = MaterialTheme.colorScheme.primary
-    // The badge fill, used as a ring so the knob reads clearly on the trail.
     val knobRingColor = MaterialTheme.colorScheme.surfaceContainer
 
     Box(
@@ -469,8 +636,6 @@ private fun FontSizeDial(
             },
         contentAlignment = Alignment.Center,
     ) {
-        // Track ring, the shaded trail, and the knob — drawn with one shared
-        // geometry so the knob sits exactly centered on the trail line.
         Canvas(Modifier.fillMaxSize().padding(9.dp)) {
             val strokeWidth = 4.dp.toPx()
             val center = Offset(size.width / 2f, size.height / 2f)
@@ -497,7 +662,6 @@ private fun FontSizeDial(
             drawCircle(knobRingColor, radius = 8.dp.toPx(), center = knobCenter)
             drawCircle(trailColor, radius = 6.dp.toPx(), center = knobCenter)
         }
-        // Current size, rendered in the selected font and color.
         Text(
             "${current.roundToInt()}",
             fontFamily = fontFamily,
@@ -508,7 +672,6 @@ private fun FontSizeDial(
     }
 }
 
-/** A small labeled icon button used inside pills, like Bare's compact actions. */
 @Composable
 private fun SmallPillButton(
     icon: Int,
@@ -552,6 +715,43 @@ private fun PillTitle(text: String, modifier: Modifier = Modifier) {
         overflow = TextOverflow.Ellipsis,
         modifier = modifier,
     )
+}
+
+// Standard "overshoot" easing (Android's OvershootInterpolator, tension 2.2).
+private val OvershootEasing = Easing { fraction ->
+    val t = fraction - 1f
+    t * t * (3.2f * t + 2.2f) + 1f
+}
+
+@Composable
+private fun AnimatedInPill(
+    index: Int,
+    count: Int,
+    shown: Boolean,
+    content: @Composable () -> Unit,
+) {
+    val delay = 120 + (count - 1 - index) * 60
+    val progress by animateFloatAsState(
+        targetValue = if (shown) 1f else 0f,
+        animationSpec = tween(durationMillis = 280, delayMillis = delay, easing = OvershootEasing),
+        label = "pillProgress",
+    )
+    val alpha by animateFloatAsState(
+        targetValue = if (shown) 1f else 0f,
+        animationSpec = tween(durationMillis = 220, delayMillis = delay),
+        label = "pillAlpha",
+    )
+    val offsetPx = with(LocalDensity.current) { 100.dp.toPx() }
+    Box(
+        Modifier.graphicsLayer {
+            scaleX = 0.3f + progress * 0.7f
+            scaleY = 0.3f + progress * 0.7f
+            translationY = (1f - progress) * offsetPx
+            this.alpha = alpha.coerceIn(0f, 1f)
+        }
+    ) {
+        content()
+    }
 }
 
 /** Decodes a small thumbnail of the background image for the badge preview. */
