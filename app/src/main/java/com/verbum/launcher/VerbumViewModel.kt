@@ -227,7 +227,7 @@ class VerbumViewModel(application: Application) : AndroidViewModel(application) 
 
     fun cycleElementAlignment(id: String) =
         viewModelScope.launch {
-            settingsRepo.updateElement(id) { it.copy(alignment = (it.alignment + 1) % 3) }
+            settingsRepo.updateElement(id) { it.copy(alignment = (it.alignment + 1) % 4) }
         }
 
     // ------------------------------------------------------------------

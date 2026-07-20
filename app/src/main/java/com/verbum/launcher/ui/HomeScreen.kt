@@ -13,11 +13,14 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -46,6 +49,16 @@ fun VerbumApp(viewModel: VerbumViewModel) {
     val textColor = Color(settings.textColor)
     val fontFamily = rememberCustomFontFamily(settings.fontPath)
     val backgroundBitmap = rememberBackgroundBitmap(settings.bgImagePath)
+
+    val haptic = LocalHapticFeedback.current
+    var hasInitializedCustomizeOpen by remember { mutableStateOf(false) }
+    LaunchedEffect(transient.customizeOpen) {
+        if (!hasInitializedCustomizeOpen) {
+            hasInitializedCustomizeOpen = true
+        } else {
+            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+        }
+    }
 
     val appTextStyle = TextStyle(
         fontFamily = fontFamily,

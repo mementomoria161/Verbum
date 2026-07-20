@@ -61,7 +61,9 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -780,6 +782,18 @@ private fun AnimatedInPill(
         animationSpec = tween(durationMillis = 220, delayMillis = delay),
         label = "pillAlpha",
     )
+    val haptic = LocalHapticFeedback.current
+    var lastProgress by remember { mutableStateOf(progress) }
+    LaunchedEffect(progress) {
+        if (progress != lastProgress) {
+            if (progress == 1f && shown) {
+                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+            } else if (progress == 0f && !shown) {
+                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+            }
+            lastProgress = progress
+        }
+    }
     val offsetPx = with(LocalDensity.current) { 100.dp.toPx() }
     Box(
         Modifier.graphicsLayer {

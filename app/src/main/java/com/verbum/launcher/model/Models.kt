@@ -27,14 +27,15 @@ data class GridElement(
     /** When true, app names are laid out one per line instead of flowing. */
     val singleColumn: Boolean = false,
     /** Whether this block's name is shown above it on the homescreen. */
-    val showName: Boolean = true,
-    /** Horizontal alignment of the app names: 0 = left, 1 = center, 2 = right. */
+    val showName: Boolean = false,
+    /** Horizontal alignment of the app names: 0 = left, 1 = center, 2 = right, 3 = justified. */
     val alignment: Int = 1,
 )
 
 const val ALIGN_LEFT = 0
 const val ALIGN_CENTER = 1
 const val ALIGN_RIGHT = 2
+const val ALIGN_JUSTIFIED = 3
 
 fun defaultLayout(): List<GridElement> = listOf(
     GridElement(id = ALL_APPS_ID, isAllApps = true)

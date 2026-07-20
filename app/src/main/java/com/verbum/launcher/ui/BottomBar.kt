@@ -264,15 +264,18 @@ fun BottomBar(
                         contentColor = textColor,
                         visibleColor = visibleColor,
                         alwaysVisible = customizeOpen,
-                        contentPadding = PaddingValues(horizontal = 24.dp),
+                        contentPadding = if (customizeOpen) PaddingValues(horizontal = 24.dp) else PaddingValues(0.dp),
+                        square = !customizeOpen,
                     ) {
                         Icon(
                             painter = painterResource(R.drawable.ic_search),
                             contentDescription = null,
                             modifier = Modifier.size(20.dp),
                         )
-                        Spacer(Modifier.width(8.dp))
-                        Text("Search", style = labelStyle)
+                        if (customizeOpen) {
+                            Spacer(Modifier.width(8.dp))
+                            Text("Search", style = labelStyle)
+                        }
                     }
                     BarButton(
                         onClick = onOpenCustomize,

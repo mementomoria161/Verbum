@@ -69,6 +69,7 @@ import com.verbum.launcher.ElementUi
 import com.verbum.launcher.R
 import com.verbum.launcher.model.ALIGN_LEFT
 import com.verbum.launcher.model.ALIGN_RIGHT
+import com.verbum.launcher.model.ALIGN_JUSTIFIED
 import com.verbum.launcher.model.AppInfo
 import com.verbum.launcher.model.GRID_COLUMNS
 import com.verbum.launcher.model.GridElement
@@ -274,11 +275,13 @@ private fun ElementBlock(
             val hArrangement = when (el.alignment) {
                 ALIGN_LEFT -> Arrangement.spacedBy(14.dp, Alignment.Start)
                 ALIGN_RIGHT -> Arrangement.spacedBy(14.dp, Alignment.End)
+                ALIGN_JUSTIFIED -> Arrangement.SpaceBetween
                 else -> Arrangement.spacedBy(14.dp, Alignment.CenterHorizontally)
             }
             val textAlign = when (el.alignment) {
                 ALIGN_LEFT -> TextAlign.Start
                 ALIGN_RIGHT -> TextAlign.End
+                ALIGN_JUSTIFIED -> TextAlign.Justify
                 else -> TextAlign.Center
             }
 
@@ -410,6 +413,7 @@ private fun ElementBlock(
                     icon = when (el.alignment) {
                         ALIGN_LEFT -> R.drawable.ic_align_left
                         ALIGN_RIGHT -> R.drawable.ic_align_right
+                        ALIGN_JUSTIFIED -> R.drawable.ic_align_justify
                         else -> R.drawable.ic_align_center
                     },
                     active = false,
