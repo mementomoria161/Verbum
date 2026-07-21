@@ -2,9 +2,12 @@
 # Android Studio & Gradle - Ignore Local Builds
 # ==========================================
 .gradle/
-build/
-*/build/
+**/build/
+.kotlin/
 local.properties
+**/keystore.properties
+*.jks
+*.keystore
 .cxx/
 .externalNativeBuild/
 captures/
@@ -22,9 +25,9 @@ captures/
 # Output Artifacts & Compiled Files
 # ==========================================
 *.apk
+*.aab
 *.ap_
 *.aar
-*.jar
 *.dex
 *.class
 
